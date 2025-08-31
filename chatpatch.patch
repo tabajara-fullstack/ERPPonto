@@ -1,0 +1,96 @@
+--- /dev/null
++++ tools/chatpatch.ps1
+@@ -0,0 +139 @@
++param(
++  [switch]$push,
++  [string]$m = "update: apply patch from chat",
++  [string]$f = ""
++)
++$ErrorActionPreference = "Stop"
++function Ensure-Git { if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "git não encontrado." } }
++function Ensure-Repo { try { git rev-parse --is-inside-work-tree | Out-Null } catch { throw "Não é repo git." } }
++Ensure-Git; Ensure-Repo
++$patchfile = New-TemporaryFile
++if ($f -ne "") {
++  Copy-Item -Path $f -Destination $patchfile -Force
++} else {
++  try { $clip = Get-Clipboard -Raw } catch { throw "Clipboard vazio e nenhum arquivo (-f) informado." }
++  $clip = $clip -replace "`r",""
++  $clip | Set-Content -Path "$env:TEMP\clip.md" -Encoding UTF8
++  $content = Get-Content "$env:TEMP\clip.md" -Raw
++  $regex = [regex]'```(patch|diff)\s+(.*?)```'
++  $matches = $regex.Matches($content)
++  if ($matches.Count -eq 0) { throw "Nenhum bloco ```patch ou ```diff encontrado." }
++  $all = ""
++  foreach ($mch in $matches) { $all += $mch.Groups[2].Value + "`n`n" }
++  $all | Set-Content -Path $patchfile -Encoding UTF8
++}
++Write-Host ">>> git apply -p0"
++$applied=$true
++try { git apply -p0 --whitespace=nowarn $patchfile } catch { Write-Host ">>> git apply -p1"; try { git apply -p1 --whitespace=nowarn $patchfile } catch { $applied=$false } }
++if (-not $applied) { throw "Falha ao aplicar o patch." }
++git add -A
++$diff = git diff --cached --name-only
++if (-not $diff) { Write-Host "Nada para commitar." } else { git commit -m $m }
++if ($push) { try { git pull --rebase } catch {}; git push; Write-Host "✓ Push concluído." } else { Write-Host "✓ Commit local feito." }
+--- /dev/null
++++ tools/chatpatch.sh
+@@ -0,0 +89 @@
++#!/usr/bin/env bash
++# chatpatch.sh — Aplica patch do clipboard ao repositório git atual.
++set -euo pipefail
++msg="update: apply patch from chat"
++do_push=0
++from_file=""
++while [[ $# -gt 0 ]]; do
++  case "$1" in
++    --push) do_push=1; shift ;;
++    -m|--message) msg="$2"; shift 2 ;;
++    -f|--file) from_file="$2"; shift 2 ;;
++    -h|--help) echo "Uso: $0 [--push] [-m 'mensagem'] [-f arquivo.patch]"; exit 0 ;;
++    *) echo "Opção desconhecida: $1" >&2; exit 1 ;;
++  esac
++done
++if ! command -v git >/dev/null 2>&1; then echo "git não encontrado." >&2; exit 1; fi
++if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "Não é repo git." >&2; exit 1; fi
++tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
++patchfile="$tmpdir/changes.patch"
++if [[ -n "$from_file" ]]; then
++  cp "$from_file" "$patchfile"
++else
++  get_clip() {
++    if command -v pbpaste >/dev/null 2>&1; then pbpaste
++    elif command -v xclip >/dev/null 2>&1; then xclip -o -selection clipboard
++    elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --output
++    elif command -v wl-paste >/dev/null 2>&1; then wl-paste
++    else echo ""; fi
++  }
++  CONTENT="$(get_clip)"
++  if [[ -z "$CONTENT" ]]; then echo "Clipboard vazio e nenhum arquivo (-f) informado."; exit 1; fi
++  printf "%s" "$CONTENT" | tr -d '\r' > "$tmpdir/clip.md"
++  awk 'BEGIN{inblock=0} /```(patch|diff)/{inblock=1; next} /```/{if(inblock){inblock=0; print ""} next} {if(inblock) print}' "$tmpdir/clip.md" > "$patchfile"
++fi
++if [[ ! -s "$patchfile" ]]; then echo "Nenhum bloco ```patch ou ```diff encontrado."; exit 1; fi
++echo ">>> git apply -p0"; set +e; git apply -p0 --whitespace=nowarn "$patchfile"; st=$?; set -e
++if [[ $st -ne 0 ]]; then echo ">>> git apply -p1"; git apply -p1 --whitespace=nowarn "$patchfile"; fi
++git add -A
++if git diff --cached --quiet; then echo "Nada para commitar."; else git commit -m "$msg"; fi
++if [[ $do_push -eq 1 ]]; then set +e; git pull --rebase; set -e; git push; echo "✓ Push concluído."; else echo "✓ Commit local feito."; fi
+--- /dev/null
++++ tools/README.txt
+@@ -0,0 +17 @@
++ChatPatch — Aplicar patches do Chat localmente
++
++1) Copie um bloco de patch do chat (entre ```patch ... ```).
++2) Aplique:
++   - Windows (PowerShell):
++     PowerShell -ExecutionPolicy Bypass -File .\tools\chatpatch.ps1 -m "feat: aplicar patch do chat"
++     PowerShell -ExecutionPolicy Bypass -File .\tools\chatpatch.ps1 --push
++   - macOS/Linux (Bash):
++     chmod +x tools/chatpatch.sh
++     ./tools/chatpatch.sh -m "feat: aplicar patch do chat"
++     ./tools/chatpatch.sh --push
++
++Aceita também `-f caminho.patch` para aplicar a partir de um arquivo.
++Se falhar com -p0, tenta -p1 automaticamente.
++Requer Git instalado; no Linux, requer xclip/xsel/wl-paste (ou use -f).
