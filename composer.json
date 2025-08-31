@@ -7,5 +7,7 @@
     "psr-4": {
       "Source\\\\": "source/"
     }
-  }
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
 }
