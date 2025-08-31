@@ -1,0 +1,11 @@
+{
+  "name": "starter/erpponto",
+  "description": "ERPPonto - Projeto base com login",
+  "type": "project",
+  "require": {}, 
+  "autoload": {
+    "psr-4": {
+      "Source\\\\": "source/"
+    }
+  }
+}
